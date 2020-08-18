@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/filecoin-project/specs-actors/actors/abi/big"
 	"golang.org/x/xerrors"
 
 	"github.com/ipfs/go-blockservice"
@@ -40,7 +39,6 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/builtin/miner"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
-	marketevents "github.com/filecoin-project/lotus/markets/loggers"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
@@ -400,26 +398,11 @@ func (a *API) ClientListImports(ctx context.Context) ([]api.Import, error) {
 	return out, nil
 }
 
-func (a *API) ClientRetrieve(ctx context.Context, order api.RetrievalOrder, ref *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
-	events := make(chan marketevents.RetrievalEvent)
-	go a.clientRetrieve(ctx, order, ref, events)
-	return events, nil
-}
-
-func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref *api.FileRef, events chan marketevents.RetrievalEvent) {
-	defer close(events)
-
-	finish := func(e error) {
-		if e != nil {
-			events <- marketevents.RetrievalEvent{Err: e.Error(), FundsSpent: big.Zero()}
-		}
-	}
-
+func (a *API) ClientRetrieve(ctx context.Context, order api.RetrievalOrder, ref *api.FileRef) error {
 	if order.MinerPeer.ID == "" {
 		mi, err := a.StateMinerInfo(ctx, order.Miner, types.EmptyTSK)
 		if err != nil {
-			finish(err)
-			return
+			return err
 		}
 
 		order.MinerPeer = retrievalmarket.RetrievalPeer{
@@ -429,8 +412,7 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 	}
 
 	if order.Size == 0 {
-		finish(xerrors.Errorf("cannot make retrieval deal for zero bytes"))
-		return
+		return xerrors.Errorf("cannot make retrieval deal for zero bytes")
 	}
 
 	/*id, st, err := a.imgr().NewStore()
@@ -445,13 +427,6 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 
 	unsubscribe := a.Retrieval.SubscribeToEvents(func(event rm.ClientEvent, state rm.ClientDealState) {
 		if state.PayloadCID.Equals(order.Root) {
-
-			events <- marketevents.RetrievalEvent{
-				Event:         event,
-				Status:        state.Status,
-				BytesReceived: state.TotalReceived,
-				FundsSpent:    state.FundsSpent,
-			}
 
 			switch state.Status {
 			case rm.DealStatusCompleted:
@@ -470,14 +445,12 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 
 	params, err := rm.NewParamsV1(ppb, order.PaymentInterval, order.PaymentIntervalIncrease, shared.AllSelector(), order.Piece, order.UnsealPrice)
 	if err != nil {
-		finish(xerrors.Errorf("Error in retrieval params: %s", err))
-		return
+		return xerrors.Errorf("Error in retrieval params: %s", err)
 	}
 
 	store, err := a.RetrievalStoreMgr.NewStore()
 	if err != nil {
-		finish(xerrors.Errorf("Error setting up new store: %w", err))
-		return
+		return xerrors.Errorf("Error setting up new store: %w", err)
 	}
 
 	defer func() {
@@ -495,18 +468,15 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 		store.StoreID())
 
 	if err != nil {
-		finish(xerrors.Errorf("Retrieve failed: %w", err))
-		return
+		return xerrors.Errorf("Retrieve failed: %w", err)
 	}
 
 	select {
 	case <-ctx.Done():
-		finish(xerrors.New("Retrieval Timed Out"))
-		return
+		return xerrors.New("Retrieval Timed Out")
 	case err := <-retrievalResult:
 		if err != nil {
-			finish(xerrors.Errorf("Retrieve: %w", err))
-			return
+			return xerrors.Errorf("Retrieve: %w", err)
 		}
 	}
 
@@ -514,8 +484,7 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 
 	// If ref is nil, it only fetches the data into the configured blockstore.
 	if ref == nil {
-		finish(nil)
-		return
+		return nil
 	}
 
 	rdag := store.DAGService()
@@ -523,30 +492,24 @@ func (a *API) clientRetrieve(ctx context.Context, order api.RetrievalOrder, ref 
 	if ref.IsCAR {
 		f, err := os.OpenFile(ref.Path, os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			finish(err)
-			return
+			return err
 		}
 		err = car.WriteCar(ctx, rdag, []cid.Cid{order.Root}, f)
 		if err != nil {
-			finish(err)
-			return
+			return err
 		}
-		finish(f.Close())
-		return
+		return f.Close()
 	}
 
 	nd, err := rdag.Get(ctx, order.Root)
 	if err != nil {
-		finish(xerrors.Errorf("ClientRetrieve: %w", err))
-		return
+		return xerrors.Errorf("ClientRetrieve: %w", err)
 	}
 	file, err := unixfile.NewUnixfsFile(ctx, rdag, nd)
 	if err != nil {
-		finish(xerrors.Errorf("ClientRetrieve: %w", err))
-		return
+		return xerrors.Errorf("ClientRetrieve: %w", err)
 	}
-	finish(files.WriteTo(file, ref.Path))
-	return
+	return files.WriteTo(file, ref.Path)
 }
 
 func (a *API) ClientQueryAsk(ctx context.Context, p peer.ID, miner address.Address) (*storagemarket.SignedStorageAsk, error) {

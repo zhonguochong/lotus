@@ -398,11 +398,9 @@ func testRetrieval(t *testing.T, ctx context.Context, err error, client *impl.Fu
 		Path:  filepath.Join(rpath, "ret"),
 		IsCAR: carExport,
 	}
-	updates, err := client.ClientRetrieve(ctx, offers[0].Order(caddr), ref)
-	for update := range updates {
-		if update.Err != "" {
-			t.Fatalf("%v", err)
-		}
+	err := client.ClientRetrieve(ctx, offers[0].Order(caddr), ref)
+	if err != nil {
+		t.Fatalf("%+v", err)
 	}
 
 	rdata, err := ioutil.ReadFile(filepath.Join(rpath, "ret"))
