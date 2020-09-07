@@ -37,3 +37,7 @@ bin/ipget
 bin/tmp/*
 .idea
 scratchpad
+
+.gitignore
+/cmd/lotus-bench
+/extern/filecoin-ffi
